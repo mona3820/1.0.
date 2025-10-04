@@ -1,0 +1,1 @@
+<?php $title='العمال'; include __DIR__.'/_placeholder_template.php';

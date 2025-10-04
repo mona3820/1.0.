@@ -37,10 +37,47 @@ if ($__conn->connect_errno) {
     }
 }
 
-$__conn->set_charset('utf8mb4');
+ $__conn->set_charset('utf8mb4');
 
 // Expose as $conn
 $conn = $__conn;
+
+// Ensure schema exists on first run (auto-install)
+function ensureSchemaIfNeeded(mysqli $conn): void {
+    // Try simple query against users table
+    $hasUsers = $conn->query('SELECT 1 FROM users LIMIT 1');
+    if ($hasUsers !== false) {
+        return; // schema present
+    }
+    // If table missing, apply schema
+    if ($conn->errno === 1146 /* table doesn't exist */) {
+        $schemaPath = __DIR__ . '/../database/schema.sql';
+        if (file_exists($schemaPath)) {
+            $sql = file_get_contents($schemaPath) ?: '';
+            if ($sql !== '' && $conn->multi_query($sql)) {
+                // Flush results
+                do { if ($result = $conn->store_result()) { $result->free(); } } while ($conn->more_results() && $conn->next_result());
+                // Seed admin user
+                $admin = 'admin';
+                $check = $conn->prepare('SELECT id FROM users WHERE username = ? LIMIT 1');
+                $check->bind_param('s', $admin);
+                $check->execute();
+                $exists = $check->get_result()->num_rows > 0;
+                if (!$exists) {
+                    $hash = password_hash('admin123', PASSWORD_BCRYPT);
+                    $ins = $conn->prepare('INSERT INTO users (username, password, role) VALUES (?, ?, "admin")');
+                    $ins->bind_param('ss', $admin, $hash);
+                    $ins->execute();
+                }
+                // Seed defaults
+                $conn->query("INSERT IGNORE INTO categories (id, name) VALUES (1, 'عام')");
+                $conn->query("INSERT IGNORE INTO suppliers (id, name) VALUES (1, 'مزود افتراضي')");
+            }
+        }
+    }
+}
+
+ensureSchemaIfNeeded($conn);
 
 function checkAuth(): void {
     if (!isset($_SESSION['user_id'])) {
